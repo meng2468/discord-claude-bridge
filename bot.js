@@ -1,5 +1,9 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const { spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const https = require("https");
+const http = require("http");
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const client = new Client({
@@ -12,6 +16,28 @@ const client = new Client({
 
 // session ID per channel
 const sessions = new Map();
+
+const ATTACHMENTS_DIR = path.join(process.env.WORK_DIR || process.cwd(), "discord-attachments");
+fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+
+function downloadFile(url, dest) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(dest);
+    const get = url.startsWith("https") ? https.get : http.get;
+    get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        file.close();
+        fs.unlinkSync(dest);
+        return downloadFile(res.headers.location, dest).then(resolve, reject);
+      }
+      res.pipe(file);
+      file.on("finish", () => file.close(resolve));
+    }).on("error", (err) => {
+      fs.unlink(dest, () => {});
+      reject(err);
+    });
+  });
+}
 
 // split and send a message respecting Discord's 2000 char limit
 async function sendChunked(channel, text) {
@@ -124,7 +150,28 @@ client.on("messageCreate", async (msg) => {
   const start = Date.now();
 
   try {
-    const res = await callClaude(msg.content, sessionId, msg.channel);
+    // download any attachments
+    const savedFiles = [];
+    for (const attachment of msg.attachments.values()) {
+      const safeName = `${Date.now()}-${attachment.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const dest = path.join(ATTACHMENTS_DIR, safeName);
+      try {
+        await downloadFile(attachment.url, dest);
+        savedFiles.push(dest);
+        console.log(`[attachment] saved ${attachment.name} -> ${dest}`);
+      } catch (err) {
+        console.error(`[attachment] failed to download ${attachment.name}:`, err.message);
+      }
+    }
+
+    // build prompt with attachment paths
+    let prompt = msg.content || "";
+    if (savedFiles.length > 0) {
+      const fileList = savedFiles.map((f) => `  - ${f}`).join("\n");
+      prompt += `\n\nThe user attached the following files (saved locally):\n${fileList}\nRead and use these files as needed.`;
+    }
+
+    const res = await callClaude(prompt, sessionId, msg.channel);
     console.log(`[done] ${((Date.now() - start) / 1000).toFixed(1)}s, session=${res.sessionId}`);
     sessions.set(msg.channel.id, res.sessionId);
 
