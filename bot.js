@@ -6,6 +6,7 @@ const https = require("https");
 const http = require("http");
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
+const GENERAL_CHANNEL_ID = process.env.GENERAL_CHANNEL_ID || "";
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -144,9 +145,19 @@ client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
 
   console.log(`[msg] #${msg.channel.name} <${msg.author.username}> ${msg.content.slice(0, 100)}`);
-  const sessionId = sessions.get(msg.channel.id);
-  const typing = setInterval(() => msg.channel.sendTyping(), 5000);
-  msg.channel.sendTyping();
+
+  // Determine the target channel for responses
+  // If message is in the general channel (not already a thread), create a thread
+  let targetChannel = msg.channel;
+  if (GENERAL_CHANNEL_ID && msg.channel.id === GENERAL_CHANNEL_ID && !msg.channel.isThread()) {
+    const threadName = (msg.content || "Claude Session").slice(0, 100);
+    targetChannel = await msg.startThread({ name: threadName });
+    console.log(`[thread] created "${threadName}" (${targetChannel.id})`);
+  }
+
+  const sessionId = sessions.get(targetChannel.id);
+  const typing = setInterval(() => targetChannel.sendTyping(), 5000);
+  targetChannel.sendTyping();
   const start = Date.now();
 
   try {
@@ -171,16 +182,16 @@ client.on("messageCreate", async (msg) => {
       prompt += `\n\nThe user attached the following files (saved locally):\n${fileList}\nRead and use these files as needed.`;
     }
 
-    const res = await callClaude(prompt, sessionId, msg.channel);
+    const res = await callClaude(prompt, sessionId, targetChannel);
     console.log(`[done] ${((Date.now() - start) / 1000).toFixed(1)}s, session=${res.sessionId}`);
-    sessions.set(msg.channel.id, res.sessionId);
+    sessions.set(targetChannel.id, res.sessionId);
 
     // send final response
     const text = res.text || "(empty response)";
-    await sendChunked(msg.channel, `**Claude:** ${text}`);
+    await sendChunked(targetChannel, `**Claude:** ${text}`);
   } catch (err) {
     console.error("Error:", err.message);
-    await msg.reply({ content: `Error: ${err.message.slice(0, 1900)}`, failIfNotExists: false });
+    await targetChannel.send(`Error: ${err.message.slice(0, 1900)}`);
   } finally {
     clearInterval(typing);
   }
