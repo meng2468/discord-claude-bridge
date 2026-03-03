@@ -18,7 +18,7 @@ const client = new Client({
 // session ID per channel
 const sessions = new Map();
 
-const ATTACHMENTS_DIR = path.join(process.env.WORK_DIR || process.cwd(), "discord-attachments");
+const ATTACHMENTS_DIR = "/discord-attachments";
 fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
 
 function downloadFile(url, dest) {
