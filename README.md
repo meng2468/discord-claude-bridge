@@ -43,8 +43,9 @@ cp .env.example .env
 
 ```
 DISCORD_TOKEN=your-discord-bot-token
-CLAUDE_PATH=claude          # path to claude CLI, defaults to "claude"
-WORK_DIR=/path/to/project   # working directory for Claude Code, defaults to cwd
+CLAUDE_PATH=claude              # path to claude CLI, defaults to "claude"
+WORK_DIR=/path/to/project       # working directory for Claude Code, defaults to cwd
+GENERAL_CHANNEL_ID=123456789    # optional: channel ID where messages auto-create threads
 ```
 
 ## Run
@@ -56,7 +57,7 @@ DISCORD_TOKEN=your-token node bot.js
 Or with a `.env` loader:
 
 ```bash
-node -e "require('dotenv').config()" bot.js
+node -r dotenv/config bot.js
 ```
 
 ### As a systemd service
@@ -81,11 +82,13 @@ WantedBy=multi-user.target
 
 ## How it works
 
-1. User sends a message in Discord
-2. Bot spawns `claude -p --output-format stream-json --verbose` with the message as input
-3. Claude Code runs with access to: Bash, Read, Edit, Write, Glob, Grep, WebSearch, WebFetch, NotebookEdit, Task
-4. Stream events (thinking, tool calls, results) are forwarded to the Discord channel
-5. Session ID is stored per channel so follow-up messages carry context
+1. User sends a message in Discord (optionally with file attachments)
+2. Attachments are downloaded and saved locally so Claude can read them
+3. Bot spawns `claude -p --output-format stream-json --verbose` with the message as input
+4. Claude Code runs with access to: Bash, Read, Edit, Write, Glob, Grep, WebSearch, WebFetch, NotebookEdit, Task
+5. Stream events (thinking, tool calls, results) are forwarded to the Discord channel
+6. Session ID is stored per channel so follow-up messages carry context
+7. If `GENERAL_CHANNEL_ID` is set and the message is in that channel, the bot auto-creates a thread for the conversation
 
 ## Allowed tools
 
@@ -103,3 +106,4 @@ Edit the `--allowedTools` array in `bot.js` to restrict or expand access.
 - One Claude Code process runs per message (no concurrent requests per channel)
 - No authentication beyond Discord's own permissions — anyone who can post in the channel can trigger Claude Code
 - Sessions are stored in memory and lost on restart
+- Attachments are saved to a `discord-attachments/` directory in the working directory
